@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+data/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.git/
+.oauth-*
+original-manifest.json
+client_secret_*.json
+.tools/

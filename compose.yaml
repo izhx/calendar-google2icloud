@@ -1,0 +1,31 @@
+services:
+  calendar-sync:
+    image: calendar-google2icloud:local
+    build: .
+    mem_limit: 160m
+    mem_reservation: 48m
+    mem_swappiness: 1
+    cpus: 0.25
+    pids_limit: 64
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        format: raw
+    environment:
+      STATE_FILE: /data/state.json
+    volumes:
+      - calendar-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "2"
+volumes:
+  calendar-data:

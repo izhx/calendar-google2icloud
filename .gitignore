@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+data/
+.venv/
+__pycache__/
+*.pyc
+.oauth-*
+client_secret_*.json
+.tools/
