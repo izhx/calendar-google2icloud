@@ -36,7 +36,7 @@ Google Calendar API 单向同步到一个专用 iCloud CalDAV 日历。一个 Do
 
    ```sh
    cd ~/workspace/calendar-google2icloud
-   python3.12 -m venv .venv
+   python -m venv .venv
    .venv/bin/pip install -r requirements.txt
    cp .env.example .env
    chmod 600 .env
@@ -89,9 +89,9 @@ docker compose logs -f --tail=50
 
 本项目部署在 SSH 别名 `vps` 的 `~/calendar-google2icloud`。日历状态留在服务器的 Docker 命名卷中，日常更新只上传代码和所需配置，不上传本机 `data/`、`.git/`、`.venv/` 或客户端 JSON。`.env` 仅通过加密 SSH/SCP 传输；远端文件权限设为 0600，项目目录为 0700，不打印展开后的容器配置。
 
-该服务器单核、约 545 MB 内存。Compose 默认限制服务 **160 MiB 内存、0.25 CPU、64 个进程**；容器设置 `mem_swappiness: 1`（降低交换倾向），临时目录最多 8 MiB，日志轮转为 1 MiB × 2。服务器内核不支持单独的 swap 配额，未修改宿主机内核或交换空间。没有额外数据库、Web 服务或开放端口。Google 缓存很大的日历可能触及内存上限，应先观察实际峰值，再按服务器余量调整。
+该服务器运行 Debian 12，约 521 MiB 内存。Compose 默认限制服务 **160 MiB 内存、0.25 CPU、64 个进程**；临时目录最多 8 MiB，日志轮转为 1 MiB × 2。当前内核不支持 `mem_swappiness`，Docker 会提示并忽略该配置，内存和 CPU 限制仍生效。未修改宿主机内核或交换空间。没有额外数据库、Web 服务或开放端口。Google 缓存很大的日历可能触及内存上限，应先观察实际峰值，再按服务器余量调整。
 
-部署工具为项目内 `.tools/docker-compose`（2.30.3，下载后校验官方 SHA-256），不安装或升级全局 Docker。镜像使用 Python 3.12 Alpine 3.22，仅安装预编译依赖，关闭安装进度线程，不在服务器上编译 Python 扩展。已实测该旧版 Docker 下 Debian 基础镜像无法创建线程，改用 musl 的 Alpine 基础镜像，保留默认容器安全策略，不放开 seccomp 或升级宿主机。小机器更新时采用受限的串行构建，然后启动已构建镜像：
+部署使用服务器现有的 Docker 29.9.1 和 Docker Compose 5.6.0。镜像使用 Python 3.12 Alpine 3.22，仅安装预编译依赖，关闭安装进度线程，不在服务器上编译 Python 扩展，保留默认容器安全策略。更新时采用受限的串行构建，然后启动已构建镜像：
 
 ```sh
 ssh vps
@@ -99,14 +99,14 @@ cd ~/calendar-google2icloud
 DOCKER_BUILDKIT=0 docker build --memory=160m \
   --cpu-period=100000 --cpu-quota=25000 --force-rm \
   -t calendar-google2icloud:local .
-.tools/docker-compose up -d --no-build
-.tools/docker-compose logs --tail=30 calendar-sync
+docker compose up -d --no-build --pull never calendar-sync
+docker compose logs --tail=30 calendar-sync
 docker stats --no-stream
 ```
 
-今后仍部署到此目录。可从本机项目目录用 `scp` 上传明确的服务文件，并单独传 `.env`；不要把整个工作目录递归复制到服务器，以免携带秘密 JSON、本地状态或开发环境。保留远端 `.tools/` 与持久化卷。构建失败时先修复构建，不停止正在运行的旧服务；不执行全局镜像、容器或卷清理。
+今后仍部署到此目录。可从本机项目目录用 `scp` 上传明确的服务文件，并单独传 `.env`；不要把整个工作目录递归复制到服务器，以免携带秘密 JSON、本地状态或开发环境。保留远端持久化卷。构建失败时先修复构建，不停止正在运行的旧服务；不执行全局镜像、容器或卷清理。
 
-部署记录（2026-10-18）：已使用现有 iCloud「Google」日历启动常驻服务，Docker 随系统启动，容器自动重启策略为 `unless-stopped`。初次同步与随后从已保存游标恢复的增量检查均成功。初次观测空闲内存约 35 MiB、启动峰值约 67 MiB；宿主机仍有约 236 MiB 可用内存。`.env` 和状态文件权限均为 0600，未对外开放端口。原有数据库容器未改动。首次 Google 源缓存为 0 条，因此目前验证的是两端连接、空同步和状态恢复，后续真实事件将按 10 分钟规则同步。
+部署记录（2026-10-21）：已在重装后的 VPS 恢复常驻服务，继续使用现有 iCloud「Google」日历。旧状态卷已不存在，本次重新建立命名卷并读取完整 Google 源缓存，共 2 条事件。只读预览和首次真实同步均成功，新增 1 条、更新 1 条、删除 0 条。Docker 随系统启动，容器自动重启策略为 `unless-stopped`，同步间隔 600 秒。观测空闲内存约 43 MiB，宿主机约 252 MiB 内存可用。项目目录权限为 0700，`.env` 和状态文件均为 0600，未对外开放端口。
 
 ## 删除、安全与状态
 
@@ -175,7 +175,7 @@ docker compose run --rm calendar-sync python -m unittest discover -s tests -v
 
 测试使用合成 Google JSON/ICS、模拟传输与临时状态，不使用真实凭据。覆盖增量分页与持久化、410 重建、缓存原子提交、无变化时零 iCloud 请求、单个变化定点读取、每日核对、默认提醒变化、跨窗口改期、完整重复例外、UID 与 ETag、删除保护、退避重试、超时跳过和 OAuth。
 
-本地使用 Python 3.12，100 项测试全部通过。本机无 Docker；已在 VPS 的最终 Alpine 镜像内完成 100 项测试，并通过真实 Google/iCloud 连接、首次同步和持久化增量恢复检查。首次源缓存和同步范围均为 0 条，尚无实际事件可验证写入。
+2026-10-21 已在 VPS 的最终 Alpine 镜像内，以非 root 用户、只读根文件系统及服务相同的资源限制完成 100 项测试，全部通过。另已通过真实 Google/iCloud 连接、两个窗口的只读预览及真实事件新增、更新检查；源缓存共 2 条事件，同步状态与增量游标已保存到命名卷。重启后的增量同步保持 2 条不变，没有重复写入或删除，也未重复当天已完成的历史任务和核对。
 
 ## 官方参考
 
